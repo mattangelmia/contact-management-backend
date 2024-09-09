@@ -1,9 +1,12 @@
 const http = require("http");
+require("dotenv").config();
 const express = require("express");
 const app = express();
 const cors = require("cors");
+const Contact = require("./models/contact");
 app.use(cors());
 app.use(express.json());
+// app.use(requestLogger);
 
 app.use(express.static("build"));
 
@@ -46,46 +49,51 @@ const generateId = () => {
 /// get a specific contact
 
 app.get("/api/contacts/:id", (request, response) => {
-  const id = request.params.id;
-  const contact = contacts.find((contact) => contact.id === id);
-  if (contact) {
-    response.json(contact);
-  } else {
-    response.status(404).end();
-    // response.send("<h1>404 Not found dudeee!</h1>");
-  }
+  Contact.findById(request.params.id)
+    .then((contact) => {
+      if (contact) {
+        response.json(contact);
+      } else {
+        response.status(404).end();
+      }
+    })
+    .catch((error) => next(error));
 });
 
-app.get("/", (request, response) => {
-  response.send("<h1>Hello World!</h1>");
+app.get("/", (request, response, next) => {
+  response.send("<h1>Hi there World!</h1>");
 });
 
 app.get("/info", (request, response) => {
   const currentTime = new Date().toLocaleString(); // Get the current date and time
 
   response.send(
-    `<h1>the phone book has info for ${contacts.length} people!</h1><br/> <p> request recieved at${currentTime}</p>`
+    `<h1>yuhhhh the phone book has info for ${contacts.length} people!</h1><br/> <p> request recieved at${currentTime}</p>`
   );
 });
 
 /// get all contacts
 
 app.get("/api/contacts", (request, response) => {
-  response.json(contacts);
+  Contact.find({}).then((contacts) => {
+    response.json(contacts);
+  });
 });
 
 /// delete a contact
 
 app.delete("/api/contacts/:id", (request, response) => {
   const id = request.params.id;
-  contacts = contacts.filter((contact) => contact.id !== id);
-
-  response.status(204).end();
+  Contact.findByIdAndDelete(id)
+    .then((result) => {
+      response.status(204).end();
+    })
+    .catch((error) => next(error));
 });
 
 /// add new contact
 
-app.post("/api/contacts", (request, response) => {
+app.post("/api/contacts", (request, response, next) => {
   const body = request.body;
 
   // Check if the required fields are provided
@@ -100,27 +108,25 @@ app.post("/api/contacts", (request, response) => {
     (contact) => contact.name === body.name
   );
 
-  const existingNumber = contacts.find(
-    (contact) => contact.number === body.number
-  );
-  if (existingContact || existingNumber) {
-    return response.status(400).json({
-      error: "contact already exists",
-    });
-  }
-
   // Create a new contact object
-  const contact = {
+  const contact = new Contact({
     name: body.name,
     number: body.number,
-    id: generateId(), // Assume you have a function to generate unique IDs
-  };
+  });
 
-  // Add the new contact to the array
-  contacts = contacts.concat(contact);
+  contact
+    .save()
+    .then((savedContact) => {
+      console.log(`${contact.name} has been saved to the database`);
+      response.json(savedContact);
+    })
+    .catch((error) => next(error));
 
-  // Respond with the newly created contact
-  response.json(contact);
+  // // Add the new contact to the array
+  // contacts = contacts.concat(contact);
+  // console.log("contact added");
+  // // Respond with the newly created contact
+  // response.json(contact);
 });
 
 /// edit a contact
@@ -129,20 +135,44 @@ app.put("/api/contacts/:id", (request, response) => {
   const body = request.body;
 
   const id = request.params.id;
+  const contact = {
+    name: body.name,
+    number: body.number,
+  };
 
-  const contactToEdit = contacts.find((contact) => contact.id === id);
-
-  if (contactToEdit) {
-    const updatedContact = { ...contactToEdit, number: body.number };
-    contacts = contacts.map((contact) =>
-      contact.id === id ? updatedContact : contact
-    );
-    response.json(updatedContact);
-  } else {
-    response.status(404).end();
-  }
+  Contact.findByIdAndUpdate(id, contact, {
+    new: true,
+    runValidators: true,
+    context: "query",
+  })
+    .then((updatedNote) => {
+      response.json(updatedNote);
+    })
+    .catch((error) => next(error));
 });
 
-const PORT = process.env.PORT || 3003;
+// this has to be the last loaded middleware, also all the routes should be registered before this!
+const unknownEndpoint = (request, response) => {
+  response.status(404).send({ error: "unknown endpoint" });
+};
+
+// handler of requests with unknown endpoint
+app.use(unknownEndpoint);
+
+const errorHandler = (error, request, response, next) => {
+  console.error(error.message);
+
+  if (error.name === "CastError") {
+    return response.status(400).send({ error: "malformatted id" });
+  } else if (error.name === "ValidationError") {
+    return response.status(400).json({ error: error.message });
+  }
+
+  next(error);
+};
+
+app.use(errorHandler);
+
+const PORT = process.env.PORT;
 app.listen(PORT);
 console.log(`Server running on port ${PORT}`);
